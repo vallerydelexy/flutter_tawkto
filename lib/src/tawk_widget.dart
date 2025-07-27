@@ -13,7 +13,7 @@ class Tawk extends StatefulWidget {
   /// Tawk direct chat link.
   final String directChatLink;
 
-  /// Object used to set the visitor name and email.
+  /// Object used to set the visitor name, email, and pre-filled message.
   final TawkVisitor? visitor;
 
   /// Called right after the widget is rendered.
@@ -43,7 +43,7 @@ class _TawkState extends State<Tawk> {
   bool _isLoading = true;
 
   void _setUser(TawkVisitor visitor) {
-    final json = jsonEncode(visitor);
+    final json = jsonEncode(visitor.toJson());
     String javascriptString;
 
     if (Platform.isIOS) {
@@ -60,6 +60,29 @@ class _TawkState extends State<Tawk> {
       ''';
     }
 
+    _controller.evaluateJavascript(source: javascriptString);
+  }
+
+  void _setPrefilledMessage(String message) {
+    String javascriptString = '''
+      Tawk_API = Tawk_API || {};
+      Tawk_API.onLoad = function() {
+        Tawk_API.setAttributes({
+          'message': '$message'
+        }, function(error){
+          // You can handle errors here if needed
+        });
+        
+        // A more direct way to pre-fill the textarea
+        setTimeout(function() {
+          const messageTextarea = document.querySelector('textarea[aria-label="chat-message-textarea"]');
+          if (messageTextarea) {
+            messageTextarea.value = '$message';
+            messageTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }, 1000); // Delay to ensure the widget is fully loaded
+      };
+    ''';
     _controller.evaluateJavascript(source: javascriptString);
   }
 
@@ -108,6 +131,9 @@ class _TawkState extends State<Tawk> {
             init();
             if (widget.visitor != null) {
               _setUser(widget.visitor!);
+              if (widget.visitor!.message != null && widget.visitor!.message!.isNotEmpty) {
+                _setPrefilledMessage(widget.visitor!.message!);
+              }
             }
 
             if (widget.onLoad != null) {
