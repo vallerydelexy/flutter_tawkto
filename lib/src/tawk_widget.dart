@@ -42,20 +42,44 @@ class _TawkState extends State<Tawk> {
   late InAppWebViewController _controller;
   bool _isLoading = true;
 
-  void _setUser(TawkVisitor visitor) {
-    final json = jsonEncode(visitor.toJson());
+  // This single function will handle setting visitor attributes AND the pre-filled message.
+  void _setupTawk(TawkVisitor visitor) {
+    // Encode the attributes (name, email, hash) from your TawkVisitor
+    final attributesJson = jsonEncode(visitor.toJson());
+
+    // IMPORTANT: Encode the message separately to handle special characters
+    // and newlines, creating a valid JavaScript string literal.
+    final messageJson = jsonEncode(visitor.message ?? '');
+
     String javascriptString;
 
+    // This JavaScript logic will be injected into the webview.
+    // It sets the textarea value and dispatches an 'input' event
+    // to ensure the Tawk.to app recognizes the change.
+    final messageLogic = '''
+      setTimeout(function() {
+        const messageTextarea = document.querySelector('textarea[aria-label="chat-message-textarea"]');
+        if (messageTextarea && messageTextarea.value === '') {
+          messageTextarea.value = $messageJson;
+          messageTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }, 500);
+    ''';
+
+    // Combine setting attributes and pre-filling the message in one script
+    // to avoid overwriting Tawk_API.onLoad.
     if (Platform.isIOS) {
       javascriptString = '''
         Tawk_API = Tawk_API || {};
-        Tawk_API.setAttributes($json);
+        Tawk_API.setAttributes($attributesJson);
+        $messageLogic
       ''';
     } else {
       javascriptString = '''
         Tawk_API = Tawk_API || {};
         Tawk_API.onLoad = function() {
-          Tawk_API.setAttributes($json);
+          Tawk_API.setAttributes($attributesJson);
+          $messageLogic
         };
       ''';
     }
@@ -63,32 +87,11 @@ class _TawkState extends State<Tawk> {
     _controller.evaluateJavascript(source: javascriptString);
   }
 
-  void _setPrefilledMessage(String message) {
-    String javascriptString = '''
-      Tawk_API = Tawk_API || {};
-      Tawk_API.onLoad = function() {
-        Tawk_API.setAttributes({
-          'message': '$message'
-        }, function(error){
-          // You can handle errors here if needed
-        });
-        
-        // A more direct way to pre-fill the textarea
-        setTimeout(function() {
-          const messageTextarea = document.querySelector('textarea[aria-label="chat-message-textarea"]');
-          if (messageTextarea) {
-            messageTextarea.value = '$message';
-            messageTextarea.dispatchEvent(new Event('input', { bubbles: true }));
-          }
-        }, 1000); // Delay to ensure the widget is fully loaded
-      };
-    ''';
-    _controller.evaluateJavascript(source: javascriptString);
-  }
-
   @override
   void initState() {
     super.initState();
+    // The init() call was moved here to ensure it runs once.
+    init();
   }
 
   void init() async {
@@ -128,12 +131,9 @@ class _TawkState extends State<Tawk> {
             });
           },
           onLoadStop: (_, __) {
-            init();
+            // All JavaScript injection now happens in _setupTawk
             if (widget.visitor != null) {
-              _setUser(widget.visitor!);
-              if (widget.visitor!.message != null && widget.visitor!.message!.isNotEmpty) {
-                _setPrefilledMessage(widget.visitor!.message!);
-              }
+              _setupTawk(widget.visitor!);
             }
 
             if (widget.onLoad != null) {
@@ -143,6 +143,10 @@ class _TawkState extends State<Tawk> {
             setState(() {
               _isLoading = false;
             });
+          },
+          onConsoleMessage: (controller, consoleMessage) {
+            // Useful for debugging JavaScript errors in your Flutter console
+            print(consoleMessage);
           },
         ),
         _isLoading
